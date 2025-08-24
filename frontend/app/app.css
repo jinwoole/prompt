@@ -7,9 +7,12 @@
 
 html,
 body {
-  @apply bg-white dark:bg-gray-950;
+  margin: 0;
+  @apply bg-white text-black antialiased;
+}
 
-  @media (prefers-color-scheme: dark) {
-    color-scheme: dark;
-  }
+/* Selection color for clarity */
+::selection {
+  background: #000;
+  color: #fff;
 }
