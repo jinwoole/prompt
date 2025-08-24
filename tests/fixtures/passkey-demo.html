@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Passkey Authentication Demo</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        .section h2 {
+            color: #555;
+            margin-top: 0;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .passkey-btn {
+            background: #28a745;
+        }
+        .passkey-btn:hover {
+            background: #1e7e34;
+        }
+        .danger-btn {
+            background: #dc3545;
+        }
+        .danger-btn:hover {
+            background: #c82333;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        .credentials-list {
+            margin-top: 15px;
+        }
+        .credential-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .credential-info {
+            flex-grow: 1;
+        }
+        .credential-name {
+            font-weight: 500;
+            color: #333;
+        }
+        .credential-details {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+        pre {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Passkey Authentication Demo</h1>
+        
+        <!-- Traditional Login Section -->
+        <div class="section">
+            <h2>Traditional Login</h2>
+            <div class="form-group">
+                <label for="username">Username:</label>
+                <input type="text" id="username" value="testuser" placeholder="Enter username">
+            </div>
+            <div class="form-group">
+                <label for="password">Password:</label>
+                <input type="password" id="password" value="testpassword123" placeholder="Enter password">
+            </div>
+            <button onclick="traditionalLogin()">Login with Password</button>
+            <button onclick="registerUser()">Register New User</button>
+            <div id="traditional-status"></div>
+        </div>
+
+        <!-- Passkey Registration Section -->
+        <div class="section">
+            <h2>Passkey Registration</h2>
+            <p>Register a passkey for passwordless authentication. You must be logged in first.</p>
+            <div class="form-group">
+                <label for="passkey-name">Passkey Name (optional):</label>
+                <input type="text" id="passkey-name" placeholder="My iPhone/MacBook/etc.">
+            </div>
+            <button class="passkey-btn" onclick="registerPasskey()">🔑 Register Passkey</button>
+            <div id="registration-status"></div>
+        </div>
+
+        <!-- Passkey Authentication Section -->
+        <div class="section">
+            <h2>Passkey Authentication</h2>
+            <p>Login using your registered passkey (passwordless).</p>
+            <div class="form-group">
+                <label for="auth-username">Username (optional for usernameless flow):</label>
+                <input type="text" id="auth-username" value="testuser" placeholder="Leave empty for usernameless login">
+            </div>
+            <button class="passkey-btn" onclick="authenticateWithPasskey()">🔐 Login with Passkey</button>
+            <div id="authentication-status"></div>
+        </div>
+
+        <!-- Passkey Management Section -->
+        <div class="section">
+            <h2>Manage Passkeys</h2>
+            <p>View and manage your registered passkeys.</p>
+            <button onclick="listPasskeys()">📋 List My Passkeys</button>
+            <div id="passkeys-list"></div>
+        </div>
+
+        <!-- Current Session Section -->
+        <div class="section">
+            <h2>Current Session</h2>
+            <button onclick="getCurrentUser()">👤 Get Current User</button>
+            <button class="danger-btn" onclick="logout()">🚪 Logout</button>
+            <div id="session-status"></div>
+        </div>
+
+        <!-- Debug Section -->
+        <div class="section">
+            <h2>Debug Information</h2>
+            <button onclick="checkWebAuthnSupport()">🔍 Check WebAuthn Support</button>
+            <div id="debug-info"></div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let currentToken = localStorage.getItem('access_token');
+        const API_BASE = 'http://localhost:8000/api/v1';
+
+        // Utility functions
+        function showStatus(elementId, message, type = 'info') {
+            const element = document.getElementById(elementId);
+            element.innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+
+        function getAuthHeaders() {
+            return currentToken ? { 'Authorization': `Bearer ${currentToken}` } : {};
+        }
+
+        // WebAuthn utility functions
+        function base64URLStringToBuffer(base64URLString) {
+            const base64 = base64URLString.replace(/-/g, '+').replace(/_/g, '/');
+            const padLength = (4 - (base64.length % 4)) % 4;
+            const padded = base64.padEnd(base64.length + padLength, '=');
+            return Uint8Array.from(atob(padded), c => c.charCodeAt(0));
+        }
+
+        function bufferToBase64URLString(buffer) {
+            const bytes = new Uint8Array(buffer);
+            let str = '';
+            for (const charCode of bytes) {
+                str += String.fromCharCode(charCode);
+            }
+            const base64String = btoa(str);
+            return base64String.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+        }
+
+        // Authentication functions
+        async function registerUser() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            if (!username || !password) {
+                showStatus('traditional-status', 'Please enter username and password', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/auth/register`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: `${username}@example.com`,
+                        username: username,
+                        password: password
+                    })
+                });
+
+                if (response.ok) {
+                    const user = await response.json();
+                    showStatus('traditional-status', `User registered successfully: ${user.username}`, 'success');
+                } else {
+                    const error = await response.json();
+                    showStatus('traditional-status', `Registration failed: ${error.detail}`, 'error');
+                }
+            } catch (error) {
+                showStatus('traditional-status', `Network error: ${error.message}`, 'error');
+            }
+        }
+
+        async function traditionalLogin() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            if (!username || !password) {
+                showStatus('traditional-status', 'Please enter username and password', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/auth/login/json`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: username,
+                        password: password
+                    })
+                });
+
+                if (response.ok) {
+                    const tokenData = await response.json();
+                    currentToken = tokenData.access_token;
+                    localStorage.setItem('access_token', currentToken);
+                    showStatus('traditional-status', 'Login successful!', 'success');
+                } else {
+                    const error = await response.json();
+                    showStatus('traditional-status', `Login failed: ${error.detail}`, 'error');
+                }
+            } catch (error) {
+                showStatus('traditional-status', `Network error: ${error.message}`, 'error');
+            }
+        }
+
+        async function registerPasskey() {
+            if (!currentToken) {
+                showStatus('registration-status', 'Please login first to register a passkey', 'error');
+                return;
+            }
+
+            const username = document.getElementById('username').value;
+            const passkeyName = document.getElementById('passkey-name').value;
+
+            if (!username) {
+                showStatus('registration-status', 'Please enter a username', 'error');
+                return;
+            }
+
+            try {
+                showStatus('registration-status', 'Starting passkey registration...', 'info');
+
+                // Step 1: Begin registration
+                const beginResponse = await fetch(`${API_BASE}/passkey/register/begin`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username: username })
+                });
+
+                if (!beginResponse.ok) {
+                    const error = await beginResponse.json();
+                    throw new Error(error.detail);
+                }
+
+                const options = await beginResponse.json();
+
+                // Step 2: Convert options for WebAuthn API
+                const createCredentialOptions = {
+                    publicKey: {
+                        challenge: base64URLStringToBuffer(options.challenge),
+                        rp: options.rp,
+                        user: {
+                            ...options.user,
+                            id: base64URLStringToBuffer(options.user.id)
+                        },
+                        pubKeyCredParams: options.pubKeyCredParams,
+                        timeout: options.timeout,
+                        attestation: options.attestation,
+                        authenticatorSelection: options.authenticatorSelection,
+                        excludeCredentials: options.excludeCredentials.map(cred => ({
+                            ...cred,
+                            id: base64URLStringToBuffer(cred.id)
+                        }))
+                    }
+                };
+
+                showStatus('registration-status', 'Please interact with your authenticator...', 'info');
+
+                // Step 3: Create credential
+                const credential = await navigator.credentials.create(createCredentialOptions);
+
+                if (!credential) {
+                    throw new Error('Failed to create credential');
+                }
+
+                // Step 4: Complete registration
+                const registrationResponse = {
+                    id: credential.id,
+                    rawId: bufferToBase64URLString(credential.rawId),
+                    response: {
+                        attestationObject: bufferToBase64URLString(credential.response.attestationObject),
+                        clientDataJSON: bufferToBase64URLString(credential.response.clientDataJSON)
+                    },
+                    type: credential.type,
+                    name: passkeyName || 'Unnamed Passkey'
+                };
+
+                const completeResponse = await fetch(`${API_BASE}/passkey/register/complete`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify(registrationResponse)
+                });
+
+                if (completeResponse.ok) {
+                    const result = await completeResponse.json();
+                    showStatus('registration-status', `Passkey registered successfully: ${result.name}`, 'success');
+                    document.getElementById('passkey-name').value = '';
+                } else {
+                    const error = await completeResponse.json();
+                    throw new Error(error.detail);
+                }
+
+            } catch (error) {
+                showStatus('registration-status', `Passkey registration failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function authenticateWithPasskey() {
+            const username = document.getElementById('auth-username').value;
+
+            try {
+                showStatus('authentication-status', 'Starting passkey authentication...', 'info');
+
+                // Step 1: Begin authentication
+                const beginResponse = await fetch(`${API_BASE}/passkey/authenticate/begin`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username: username || undefined })
+                });
+
+                if (!beginResponse.ok) {
+                    const error = await beginResponse.json();
+                    throw new Error(error.detail);
+                }
+
+                const options = await beginResponse.json();
+
+                // Step 2: Convert options for WebAuthn API
+                const getCredentialOptions = {
+                    publicKey: {
+                        challenge: base64URLStringToBuffer(options.challenge),
+                        rpId: options.rpId,
+                        timeout: options.timeout,
+                        userVerification: options.userVerification,
+                        allowCredentials: options.allowCredentials.map(cred => ({
+                            ...cred,
+                            id: base64URLStringToBuffer(cred.id)
+                        }))
+                    }
+                };
+
+                showStatus('authentication-status', 'Please interact with your authenticator...', 'info');
+
+                // Step 3: Get credential
+                const assertion = await navigator.credentials.get(getCredentialOptions);
+
+                if (!assertion) {
+                    throw new Error('Failed to get credential');
+                }
+
+                // Step 4: Complete authentication
+                const authenticationResponse = {
+                    id: assertion.id,
+                    rawId: bufferToBase64URLString(assertion.rawId),
+                    response: {
+                        authenticatorData: bufferToBase64URLString(assertion.response.authenticatorData),
+                        clientDataJSON: bufferToBase64URLString(assertion.response.clientDataJSON),
+                        signature: bufferToBase64URLString(assertion.response.signature),
+                        challenge: options.challenge  // Include for usernameless flow
+                    },
+                    type: assertion.type
+                };
+
+                const completeResponse = await fetch(`${API_BASE}/passkey/authenticate/complete`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(authenticationResponse)
+                });
+
+                if (completeResponse.ok) {
+                    const result = await completeResponse.json();
+                    currentToken = result.access_token;
+                    localStorage.setItem('access_token', currentToken);
+                    showStatus('authentication-status', `Passkey authentication successful! Welcome ${result.user.username}`, 'success');
+                } else {
+                    const error = await completeResponse.json();
+                    throw new Error(error.detail);
+                }
+
+            } catch (error) {
+                showStatus('authentication-status', `Passkey authentication failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function listPasskeys() {
+            if (!currentToken) {
+                showStatus('passkeys-list', 'Please login first to view passkeys', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/passkey/credentials`, {
+                    headers: getAuthHeaders()
+                });
+
+                if (response.ok) {
+                    const credentials = await response.json();
+                    
+                    if (credentials.length === 0) {
+                        document.getElementById('passkeys-list').innerHTML = 
+                            '<div class="status info">No passkeys registered</div>';
+                        return;
+                    }
+
+                    const credentialsHtml = credentials.map(cred => `
+                        <div class="credential-item">
+                            <div class="credential-info">
+                                <div class="credential-name">${cred.name || 'Unnamed Passkey'}</div>
+                                <div class="credential-details">
+                                    Created: ${new Date(cred.created_at).toLocaleString()}<br>
+                                    Last used: ${cred.last_used ? new Date(cred.last_used).toLocaleString() : 'Never'}<br>
+                                    Sign count: ${cred.sign_count}
+                                </div>
+                            </div>
+                            <button class="danger-btn" onclick="deletePasskey('${cred.credential_id}')">Delete</button>
+                        </div>
+                    `).join('');
+
+                    document.getElementById('passkeys-list').innerHTML = `
+                        <div class="credentials-list">${credentialsHtml}</div>
+                    `;
+                } else {
+                    const error = await response.json();
+                    showStatus('passkeys-list', `Failed to load passkeys: ${error.detail}`, 'error');
+                }
+            } catch (error) {
+                showStatus('passkeys-list', `Network error: ${error.message}`, 'error');
+            }
+        }
+
+        async function deletePasskey(credentialId) {
+            if (!confirm('Are you sure you want to delete this passkey?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/passkey/credentials/${credentialId}`, {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
+                });
+
+                if (response.ok) {
+                    showStatus('passkeys-list', 'Passkey deleted successfully', 'success');
+                    // Refresh the list
+                    setTimeout(listPasskeys, 1000);
+                } else {
+                    const error = await response.json();
+                    showStatus('passkeys-list', `Failed to delete passkey: ${error.detail}`, 'error');
+                }
+            } catch (error) {
+                showStatus('passkeys-list', `Network error: ${error.message}`, 'error');
+            }
+        }
+
+        async function getCurrentUser() {
+            if (!currentToken) {
+                showStatus('session-status', 'Not logged in', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/auth/me`, {
+                    headers: getAuthHeaders()
+                });
+
+                if (response.ok) {
+                    const user = await response.json();
+                    showStatus('session-status', `Logged in as: ${user.username} (${user.email})`, 'success');
+                } else {
+                    currentToken = null;
+                    localStorage.removeItem('access_token');
+                    showStatus('session-status', 'Session expired', 'error');
+                }
+            } catch (error) {
+                showStatus('session-status', `Network error: ${error.message}`, 'error');
+            }
+        }
+
+        function logout() {
+            currentToken = null;
+            localStorage.removeItem('access_token');
+            showStatus('session-status', 'Logged out successfully', 'success');
+        }
+
+        function checkWebAuthnSupport() {
+            const support = {
+                webauthn: !!window.PublicKeyCredential,
+                conditionalMediation: false,
+                userVerifyingPlatformAuthenticator: false
+            };
+
+            if (support.webauthn) {
+                // Check for conditional mediation
+                if (PublicKeyCredential.isConditionalMediationAvailable) {
+                    PublicKeyCredential.isConditionalMediationAvailable().then(available => {
+                        support.conditionalMediation = available;
+                        updateDebugInfo();
+                    });
+                }
+
+                // Check for user verifying platform authenticator
+                if (PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable) {
+                    PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().then(available => {
+                        support.userVerifyingPlatformAuthenticator = available;
+                        updateDebugInfo();
+                    });
+                }
+            }
+
+            function updateDebugInfo() {
+                const debugHtml = `
+                    <pre>${JSON.stringify(support, null, 2)}</pre>
+                    <div class="status ${support.webauthn ? 'success' : 'error'}">
+                        ${support.webauthn ? 
+                            'WebAuthn is supported in this browser!' : 
+                            'WebAuthn is not supported in this browser.'}
+                    </div>
+                `;
+                document.getElementById('debug-info').innerHTML = debugHtml;
+            }
+
+            updateDebugInfo();
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            if (currentToken) {
+                getCurrentUser();
+            }
+            checkWebAuthnSupport();
+        });
+    </script>
+</body>
+</html>
