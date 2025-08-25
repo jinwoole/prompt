@@ -16,3 +16,47 @@ body {
   background: #000;
   color: #fff;
 }
+
+/* Micro-interactions for block editor */
+@keyframes pop-in {
+  from {
+    transform: translateY(6px) scale(0.98);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@keyframes pop-out {
+  from {
+    transform: none;
+    opacity: 1;
+  }
+  to {
+    transform: translateY(-6px) scale(0.98);
+    opacity: 0;
+  }
+}
+
+@keyframes bump-up {
+  from { transform: translateY(-6px); }
+  to { transform: none; }
+}
+
+@keyframes bump-down {
+  from { transform: translateY(6px); }
+  to { transform: none; }
+}
+
+@keyframes flash-bg {
+  0% { background-color: #fff7cc; }
+  100% { background-color: transparent; }
+}
+
+.anim-pop-in { animation: pop-in 160ms ease-out; will-change: transform, opacity; }
+.anim-pop-out { animation: pop-out 140ms ease-in forwards; will-change: transform, opacity; }
+.bump-up { animation: bump-up 160ms ease-out; will-change: transform; }
+.bump-down { animation: bump-down 160ms ease-out; will-change: transform; }
+.flash-bg { animation: flash-bg 900ms ease-out; }
