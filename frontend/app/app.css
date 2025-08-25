@@ -20,7 +20,7 @@ body {
 /* Micro-interactions for block editor */
 @keyframes pop-in {
   from {
-    transform: translateY(6px) scale(0.98);
+    transform: translateY(8px) scale(0.96);
     opacity: 0;
   }
   to {
@@ -41,12 +41,12 @@ body {
 }
 
 @keyframes bump-up {
-  from { transform: translateY(-6px); }
+  from { transform: translateY(-10px); }
   to { transform: none; }
 }
 
 @keyframes bump-down {
-  from { transform: translateY(6px); }
+  from { transform: translateY(10px); }
   to { transform: none; }
 }
 
@@ -60,3 +60,65 @@ body {
 .bump-up { animation: bump-up 160ms ease-out; will-change: transform; }
 .bump-down { animation: bump-down 160ms ease-out; will-change: transform; }
 .flash-bg { animation: flash-bg 900ms ease-out; }
+
+/* Drag and drop affordances */
+.dragging {
+  opacity: 0.85;
+  transform: scale(1.01);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+  background: #fffbe6;
+}
+.dragging-strong {
+  transform: scale(1.02);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+  background: #fff7cc;
+}
+.drag-over-before,
+.drag-over-after { position: relative; }
+.drag-over-before::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -1px;
+  height: 3px;
+  background: #000;
+}
+.drag-over-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 3px;
+  background: #000;
+}
+
+.drag-handle {
+  cursor: grab;
+  touch-action: none; /* prevent scrolling while dragging on touch */
+}
+.dragging .drag-handle, .dragging-strong .drag-handle {
+  cursor: grabbing;
+}
+
+/* Right-side drawer for History */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.08);
+}
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: min(380px, 100%);
+  height: 100%;
+  background: #fff;
+  border-left: 1px solid #000;
+  transform: translateX(100%);
+  transition: transform 200ms ease-out;
+  box-shadow: -12px 0 24px rgba(0,0,0,0.08);
+  padding-right: 8px; /* avoid right-edge clipping */
+}
+.drawer.open { transform: translateX(0); }

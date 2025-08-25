@@ -10,6 +10,9 @@ type Block = {
   collapsed?: boolean;
 };
 
+type Template = { id: string; name: string; blocks: Block[]; createdAt: number; updatedAt: number };
+type HistoryEntry = { id: string; title: string; blocks: Block[]; createdAt: number };
+
 const PALETTE = [
   { label: "system", tag: "system" },
   { label: "instruction", tag: "instruction" },
@@ -22,6 +25,9 @@ const PALETTE = [
 ];
 
 const STORAGE_KEY = "xml-block-builder:v2";
+const TEMPLATES_KEY = "xml-block-builder:templates.v1";
+const HISTORY_KEY = "xml-block-builder:history.v1";
+const MAX_HISTORY = 100;
 
 function uid(prefix = "id") {
   return `${prefix}_${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-4)}`;
@@ -151,11 +157,21 @@ function TextArea(
 export default function Home() {
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [indent, setIndent] = useState<number>(2);
-  const [importError, setImportError] = useState<string | undefined>();
-  const importRef = useRef<HTMLInputElement>(null);
   const [justAddedId, setJustAddedId] = useState<string | null>(null);
   const [bumped, setBumped] = useState<{ id: string; dir: -1 | 1 } | null>(null);
   const [removing, setRemoving] = useState<Set<string>>(new Set());
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState<{ id: string; pos: "before" | "after" } | null>(null);
+  const [pointerDrag, setPointerDrag] = useState(false);
+  const pointerIdRef = useRef<number | null>(null);
+  const itemRefs = useRef(new Map<string, HTMLLIElement | null>());
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [templateName, setTemplateName] = useState<string>("");
+  const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
+  const [historyTitle, setHistoryTitle] = useState<string>("");
+  const importHistoryRef = useRef<HTMLInputElement>(null);
+  const lastSnapshotRef = useRef<{ xml: string; at: number } | null>(null);
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -176,6 +192,18 @@ export default function Home() {
           { id: uid("blk"), tag: "output_format", content: "JSON with fields: answer, reasoning", attrs: [] },
         ]);
       }
+
+      // Load templates and history
+      const rawT = localStorage.getItem(TEMPLATES_KEY);
+      if (rawT) {
+        const parsedT = JSON.parse(rawT);
+        if (Array.isArray(parsedT)) setTemplates(parsedT);
+      }
+      const rawH = localStorage.getItem(HISTORY_KEY);
+      if (rawH) {
+        const parsedH = JSON.parse(rawH);
+        if (Array.isArray(parsedH)) setHistory(parsedH);
+      }
     } catch {}
   }, []);
 
@@ -190,6 +218,63 @@ export default function Home() {
   }, [blocks, indent]);
 
   const xml = useMemo(() => buildXml(blocks, { indent }), [blocks, indent]);
+
+  function saveCurrentAsTemplate(name?: string) {
+    const nm = (name || templateName || "Untitled").trim();
+    const now = Date.now();
+    const tpl: Template = {
+      id: uid("tpl"),
+      name: nm,
+      blocks: blocks.map((b) => ({ ...b, id: uid("blk"), attrs: b.attrs.map((a) => ({ ...a, id: uid("attr") })) })),
+      createdAt: now,
+      updatedAt: now,
+    };
+    setTemplates((prev) => {
+      const next = [tpl, ...prev];
+      try {
+        localStorage.setItem(TEMPLATES_KEY, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    setTemplateName("");
+  }
+
+  function handleTemplateSelect(val: string) {
+    if (!val) return;
+    if (val.startsWith("builtin:")) {
+      loadTemplate(val.slice(8));
+    } else if (val.startsWith("custom:")) {
+      const id = val.slice(7);
+      const tpl = templates.find((t) => t.id === id);
+      if (tpl) {
+        setBlocks(tpl.blocks.map((b) => ({ ...b, id: uid("blk"), attrs: b.attrs.map((a) => ({ ...a, id: uid("attr") })) })));
+      }
+    }
+  }
+
+  function snapshotNow(title?: string) {
+    const currentXml = xml;
+    const last = lastSnapshotRef.current;
+    if (last && last.xml === currentXml) return; // avoid duplicates
+    const entry: HistoryEntry = {
+      id: uid("his"),
+      title: title?.trim() || `Auto — ${new Date().toLocaleString()}`,
+      blocks: blocks.map((b) => ({ ...b, id: uid("blk"), attrs: b.attrs.map((a) => ({ ...a, id: uid("attr") })) })),
+      createdAt: Date.now(),
+    };
+    setHistory((prev) => {
+      const next = [entry, ...prev].slice(0, MAX_HISTORY);
+      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+    lastSnapshotRef.current = { xml: currentXml, at: Date.now() };
+  }
+
+  // Auto-snapshot after inactivity
+  useEffect(() => {
+    const t = setTimeout(() => snapshotNow(), 15000);
+    return () => clearTimeout(t);
+  }, [xml]);
 
   function addBlock(tag: string) {
     const id = uid("blk");
@@ -246,6 +331,127 @@ export default function Home() {
     });
   }
 
+  // Drag & Drop
+  function handleDragStart(e: React.DragEvent, id: string) {
+    e.dataTransfer.setData("text/plain", id);
+    e.dataTransfer.effectAllowed = "move";
+    setDraggingId(id);
+  }
+
+  function handleDragOver(e: React.DragEvent, overId: string) {
+    if (!draggingId || draggingId === overId) return;
+    e.preventDefault();
+    const el = e.currentTarget as HTMLElement;
+    const rect = el.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const pos: "before" | "after" = y < rect.height / 2 ? "before" : "after";
+    setDragOver((prev) => (prev?.id === overId && prev.pos === pos ? prev : { id: overId, pos }));
+    e.dataTransfer.dropEffect = "move";
+  }
+
+  function handleDrop(e: React.DragEvent, overId: string) {
+    e.preventDefault();
+    const fromId = e.dataTransfer.getData("text/plain") || draggingId;
+    if (!fromId || fromId === overId) {
+      setDraggingId(null);
+      setDragOver(null);
+      return;
+    }
+    const pos = dragOver?.id === overId ? dragOver.pos : "after";
+    setBlocks((prev) => {
+      const fromIndex = prev.findIndex((b) => b.id === fromId);
+      const overIndex = prev.findIndex((b) => b.id === overId);
+      if (fromIndex === -1 || overIndex === -1) return prev;
+      const beforeIndex = pos === "before" ? overIndex : overIndex + 1;
+      const next = prev.slice();
+      const [item] = next.splice(fromIndex, 1);
+      const insertAt = fromIndex < beforeIndex ? beforeIndex - 1 : beforeIndex;
+      next.splice(insertAt, 0, item);
+      return next;
+    });
+    setBumped({ id: overId, dir: dragOver?.pos === "before" ? -1 : 1 });
+    setTimeout(() => setBumped((v) => (v?.id === overId ? null : v)), 220);
+    setDraggingId(null);
+    setDragOver(null);
+  }
+
+  function handleDragEnd() {
+    setDraggingId(null);
+    setDragOver(null);
+  }
+
+  // Pointer-based drag for touch (and pen). Starts from drag handle only.
+  function computeDropTarget(clientY: number, excludeId: string | null): { id: string; pos: "before" | "after" } | null {
+    const entries: Array<{ id: string; top: number; height: number }> = [];
+    itemRefs.current.forEach((el, id) => {
+      if (!el || id === excludeId) return;
+      const r = el.getBoundingClientRect();
+      entries.push({ id, top: r.top, height: r.height });
+    });
+    if (entries.length === 0) return null;
+    entries.sort((a, b) => a.top - b.top);
+    for (const e of entries) {
+      const mid = e.top + e.height / 2;
+      if (clientY < mid) return { id: e.id, pos: "before" };
+    }
+    return { id: entries[entries.length - 1].id, pos: "after" };
+  }
+
+  function onHandlePointerDown(e: React.PointerEvent, id: string) {
+    if (e.pointerType !== "touch" && e.pointerType !== "pen") return; // keep HTML5 DnD for mouse
+    try { (e.currentTarget as Element).setPointerCapture(e.pointerId); } catch {}
+    e.preventDefault();
+    pointerIdRef.current = e.pointerId;
+    setDraggingId(id);
+    setPointerDrag(true);
+    setDragOver(null);
+
+    const onMove = (ev: PointerEvent) => {
+      if (pointerIdRef.current !== ev.pointerId) return;
+      ev.preventDefault();
+      const tgt = computeDropTarget(ev.clientY, id);
+      setDragOver((prev) => (tgt && (prev?.id !== tgt.id || prev.pos !== tgt.pos) ? tgt : tgt || null));
+    };
+
+    const onUp = (ev: PointerEvent) => {
+      if (pointerIdRef.current !== ev.pointerId) return;
+      ev.preventDefault();
+      const tgt = dragOver;
+      if (tgt && draggingId) {
+        // reorder similar to drop
+        setBlocks((prev) => {
+          const fromIndex = prev.findIndex((b) => b.id === draggingId);
+          const overIndex = prev.findIndex((b) => b.id === tgt.id);
+          if (fromIndex === -1 || overIndex === -1) return prev;
+          const beforeIndex = tgt.pos === "before" ? overIndex : overIndex + 1;
+          const next = prev.slice();
+          const [item] = next.splice(fromIndex, 1);
+          const insertAt = fromIndex < beforeIndex ? beforeIndex - 1 : beforeIndex;
+          next.splice(insertAt, 0, item);
+          return next;
+        });
+        setBumped({ id: tgt.id, dir: tgt.pos === "before" ? -1 : 1 });
+        setTimeout(() => setBumped((v) => (v?.id === tgt.id ? null : v)), 220);
+      }
+      cleanup();
+    };
+
+    const cleanup = () => {
+      try { (e.currentTarget as Element).releasePointerCapture(e.pointerId); } catch {}
+      pointerIdRef.current = null;
+      setDraggingId(null);
+      setDragOver(null);
+      setPointerDrag(false);
+      window.removeEventListener("pointermove", onMove, { capture: true } as any);
+      window.removeEventListener("pointerup", onUp, { capture: true } as any);
+      window.removeEventListener("pointercancel", onUp, { capture: true } as any);
+    };
+
+    window.addEventListener("pointermove", onMove, { capture: true } as any);
+    window.addEventListener("pointerup", onUp, { capture: true } as any);
+    window.addEventListener("pointercancel", onUp, { capture: true } as any);
+  }
+
   function updateBlock(id: string, patch: Partial<Block>) {
     setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)));
   }
@@ -275,7 +481,7 @@ export default function Home() {
   }
 
   function handleCopy() {
-    navigator.clipboard.writeText(xml).catch(() => {});
+    navigator.clipboard.writeText(xml).then(() => snapshotNow("Copied")).catch(() => snapshotNow("Copied"));
   }
 
   function handleDownload() {
@@ -288,15 +494,10 @@ export default function Home() {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+    snapshotNow("Downloaded");
   }
 
-  function handleImportXml(text: string) {
-    const { blocks: blks, error } = parseXmlToBlocks(text);
-    setImportError(error);
-    if (!error) {
-      setBlocks(blks);
-    }
-  }
+  // TXT Import removed from header as requested
 
   function handleNew() {
     setBlocks([]);
@@ -304,7 +505,9 @@ export default function Home() {
   }
 
   function loadTemplate(kind: string) {
-    if (kind === "qa") {
+    if (kind === "blank") {
+      setBlocks([]);
+    } else if (kind === "qa") {
       setBlocks([
         { id: uid("blk"), tag: "system", content: "You answer questions concisely.", attrs: [] },
         { id: uid("blk"), tag: "context", content: "Use only the provided context.", attrs: [] },
@@ -340,45 +543,11 @@ export default function Home() {
               <ToolbarButton onClick={handleNew} aria-label="New">New</ToolbarButton>
               <ToolbarButton onClick={handleCopy} aria-label="Copy XML">Copy</ToolbarButton>
               <ToolbarButton onClick={handleDownload} aria-label="Download TXT">Download</ToolbarButton>
-              <ToolbarButton onClick={() => importRef.current?.click()} aria-label="Import TXT">Import</ToolbarButton>
-              <input
-                ref={importRef}
-                type="file"
-                accept=".txt,text/plain"
-                className="hidden"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  const text = await file.text();
-                  handleImportXml(text);
-                  e.currentTarget.value = "";
-                }}
-              />
+              {/* Import removed from header as requested */}
             </div>
           </div>
           <div className="flex items-center gap-2 text-sm">
-            <input
-              type="number"
-              min={0}
-              max={8}
-              className="h-8 w-16 px-2 border border-black"
-              value={indent}
-              onChange={(e) => setIndent(Number(e.target.value) || 0)}
-              title="Indent spaces"
-            />
-            <select
-              className="h-8 px-2 border border-black"
-              onChange={(e) => e.target.value && loadTemplate(e.target.value)}
-              defaultValue=""
-              title="Load a template"
-            >
-              <option value="" disabled>
-                Templates
-              </option>
-              <option value="starter">Starter</option>
-              <option value="qa">Q&A</option>
-              <option value="cot">Chain-of-thought</option>
-            </select>
+            <ToolbarButton onClick={() => setIsHistoryOpen(true)} aria-label="Open History">History</ToolbarButton>
           </div>
         </div>
       </header>
@@ -413,11 +582,34 @@ export default function Home() {
               const isRemoving = removing.has(b.id);
               const isAdded = justAddedId === b.id;
               const isBumped = bumped?.id === b.id ? (bumped.dir === -1 ? "bump-up" : "bump-down") : "";
+              const dropIndicator = dragOver?.id === b.id ? (dragOver.pos === "before" ? "drag-over-before" : "drag-over-after") : "";
+              const dragging = draggingId === b.id ? (pointerDrag ? "dragging-strong" : "dragging") : "";
               const animClass = isRemoving ? "anim-pop-out" : isAdded ? "anim-pop-in flash-bg" : isBumped;
               return (
-              <li key={b.id} className={`p-3 ${animClass}`}>
+              <li
+                key={b.id}
+                className={`p-3 ${animClass} ${dropIndicator} ${dragging}`}
+                draggable
+                onDragStart={(e) => handleDragStart(e, b.id)}
+                onDragOver={(e) => handleDragOver(e, b.id)}
+                onDrop={(e) => handleDrop(e, b.id)}
+                onDragEnd={handleDragEnd}
+                ref={(el) => {
+                  itemRefs.current.set(b.id, el);
+                  if (el === null) itemRefs.current.delete(b.id);
+                }}
+              >
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="drag-handle h-8 w-8 border border-black flex items-center justify-center"
+                      title="Drag"
+                      aria-label="Drag"
+                      onPointerDown={(e) => onHandlePointerDown(e, b.id)}
+                    >
+                      ≡
+                    </button>
                     <input
                       type="text"
                       className="h-8 w-36 px-2 border border-black"
@@ -480,7 +672,7 @@ export default function Home() {
                 <div className="mt-3">
                   <TextArea
                     label="Content"
-                    placeholder="Text content (optional)."
+                    placeholder="Type your prompt"
                     value={b.content}
                     onChange={(e) => updateBlock(b.id, { content: e.target.value })}
                   />
@@ -488,39 +680,216 @@ export default function Home() {
               </li>
             );})}
           </ul>
+
+          {/* moved library to preview panel */}
         </div>
 
         {/* Preview */}
         <div aria-labelledby="preview-title" className="border border-black flex flex-col">
           <h2 id="preview-title" className="px-3 h-12 border-b border-black flex items-center justify-between text-sm tracking-wide">
-            <span>Preview</span>
+            <div className="flex items-center gap-2">
+              <span>Preview</span>
+              <input
+                type="number"
+                min={0}
+                max={8}
+                className="ml-4 h-8 w-16 px-2 border border-black"
+                value={indent}
+                onChange={(e) => setIndent(Number(e.target.value) || 0)}
+                title="Indent spaces"
+              />
+            </div>
             <div className="flex items-center gap-2">
               <ToolbarButton onClick={handleCopy}>Copy</ToolbarButton>
               <ToolbarButton onClick={handleDownload}>Download</ToolbarButton>
             </div>
           </h2>
+          {/* Templates mini bar above preview */}
+          <div className="px-3 py-2 border-b border-black flex items-center gap-2 text-sm">
+            <select
+              className="h-8 px-2 border border-black"
+              onChange={(e) => handleTemplateSelect(e.target.value)}
+              defaultValue=""
+              title="Load a template"
+            >
+              <option value="" disabled>Templates</option>
+              <optgroup label="Built-in">
+                <option value="builtin:blank">Blank</option>
+                <option value="builtin:starter">Starter</option>
+                <option value="builtin:qa">Q&A</option>
+                <option value="builtin:cot">Chain-of-thought</option>
+              </optgroup>
+              {templates.length > 0 && (
+                <optgroup label="Custom">
+                  {templates.map((t) => (
+                    <option key={t.id} value={`custom:${t.id}`}>{t.name}</option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+            <input
+              type="text"
+              className="h-8 w-44 px-2 border border-black"
+              placeholder="Template name"
+              value={templateName}
+              onChange={(e) => setTemplateName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') saveCurrentAsTemplate(); }}
+              title="Template name"
+            />
+            <button
+              className="h-8 px-2 border border-black"
+              title="Save current as template"
+              onClick={() => saveCurrentAsTemplate()}
+            >
+              + Save
+            </button>
+          </div>
           <div className="p-3 flex-1 overflow-auto">
             <pre className="text-sm leading-6 overflow-x-auto">
               <code>{xml}</code>
             </pre>
           </div>
-          <div className="border-t border-black p-3">
-            <TextArea
-              label="Import"
-              placeholder="Prompt"
-              className="min-h-24"
-              onChange={(e) => setImportError(undefined)}
-              onBlur={(e) => {
-                const text = e.target.value.trim();
-                if (text) handleImportXml(text);
-              }}
-            />
-            {importError && (
-              <p className="mt-2 text-sm text-red-600">{importError}</p>
-            )}
-          </div>
+          {/* Removed lower Templates & History UI; managed via header and sidebar */}
         </div>
       </section>
+
+      {/* History Sidebar Drawer */}
+      {isHistoryOpen && <div className="drawer-backdrop" onClick={() => setIsHistoryOpen(false)} />}
+      <aside className={`drawer ${isHistoryOpen ? 'open' : ''} flex flex-col`} aria-label="History">
+        <div className="h-16 px-4 border-b border-black flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-sm tracking-wide">History</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              className="h-8 px-2 border border-black text-sm"
+              onClick={() => setIsHistoryOpen(false)}
+              aria-label="Close History"
+            >Close</button>
+          </div>
+        </div>
+        <div className="px-3 pr-4 py-3 border-b border-black flex items-center gap-2 flex-wrap">
+          <input
+            type="text"
+            className="h-8 w-40 px-2 border border-black"
+            placeholder="Title"
+            value={historyTitle}
+            onChange={(e) => setHistoryTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const title = (historyTitle || 'Untitled').trim();
+                const entry: HistoryEntry = { id: uid('his'), title, blocks: blocks.map((b) => ({ ...b, id: uid('blk'), attrs: b.attrs.map((a) => ({ ...a, id: uid('attr') })) })), createdAt: Date.now() };
+                setHistory((prev) => {
+                  const next = [entry, ...prev].slice(0, MAX_HISTORY);
+                  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch {}
+                  return next;
+                });
+                setHistoryTitle('');
+              }
+            }}
+          />
+          <button
+            className="h-8 px-2 border border-black text-sm"
+            onClick={() => {
+              const title = (historyTitle || 'Untitled').trim();
+              const entry: HistoryEntry = { id: uid('his'), title, blocks: blocks.map((b) => ({ ...b, id: uid('blk'), attrs: b.attrs.map((a) => ({ ...a, id: uid('attr') })) })), createdAt: Date.now() };
+              setHistory((prev) => {
+                const next = [entry, ...prev].slice(0, MAX_HISTORY);
+                try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch {}
+                return next;
+              });
+              setHistoryTitle('');
+            }}
+          >Snapshot</button>
+          <button
+            className="h-8 px-2 border border-black text-sm"
+            onClick={() => {
+              const blob = new Blob([JSON.stringify(history, null, 2)], { type: 'application/json;charset=utf-8' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = 'PromptHistory.json';
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+              URL.revokeObjectURL(url);
+            }}
+          >Export</button>
+          <button
+            className="h-8 px-2 border border-black text-sm"
+            onClick={() => importHistoryRef.current?.click()}
+          >Import</button>
+          <button
+            className="h-8 px-2 border border-black text-sm"
+            title="Clear all history"
+            onClick={() => {
+              setHistory(() => {
+                try { localStorage.setItem(HISTORY_KEY, JSON.stringify([])); } catch {}
+                return [];
+              });
+            }}
+          >Clear</button>
+          <input
+            ref={importHistoryRef}
+            type="file"
+            accept=".json,application/json,text/plain"
+            className="hidden"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              try {
+                const text = await file.text();
+                const list = JSON.parse(text);
+                if (Array.isArray(list)) {
+                  const remapped: HistoryEntry[] = list.map((h: any) => ({
+                    id: uid('his'),
+                    title: String(h.title || 'Imported'),
+                    blocks: Array.isArray(h.blocks) ? h.blocks.map((b: any) => ({
+                      id: uid('blk'),
+                      tag: String(b.tag || 'custom'),
+                      content: String(b.content || ''),
+                      attrs: Array.isArray(b.attrs) ? b.attrs.map((a: any) => ({ id: uid('attr'), name: String(a.name || ''), value: String(a.value || '') })) : [],
+                    })) : [],
+                    createdAt: Date.now(),
+                  }));
+                  setHistory((prev) => {
+                    const next = [...remapped, ...prev].slice(0, MAX_HISTORY);
+                    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch {}
+                    return next;
+                  });
+                }
+              } catch {}
+              e.currentTarget.value = '';
+            }}
+          />
+          <span className="text-xs text-neutral-500 w-full">All of your data is stored locally in your browser.</span>
+        </div>
+        <div className="p-3 overflow-auto flex-1">
+          <ul className="divide-y divide-black">
+            {history.length === 0 && (
+              <li className="py-2 text-sm text-neutral-600">No history yet.</li>
+            )}
+            {history.map((h) => (
+              <li key={h.id} className="py-2 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-sm">{h.title}</span>
+                  <span className="text-xs text-neutral-500">{new Date(h.createdAt).toLocaleString()}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button className="h-8 px-2 border border-black text-sm" onClick={() => setBlocks(h.blocks.map((b) => ({ ...b, id: uid('blk'), attrs: b.attrs.map((a) => ({ ...a, id: uid('attr') })) })))}>Load</button>
+                  <button className="h-8 w-8 border border-black" title="Delete" onClick={() => {
+                    setHistory((prev) => {
+                      const next = prev.filter((x) => x.id !== h.id);
+                      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch {}
+                      return next;
+                    });
+                  }}>✕</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </aside>
     </main>
   );
 }
