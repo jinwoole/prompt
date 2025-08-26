@@ -53,9 +53,9 @@ function buildXml(blocks: Block[], opts: { indent?: number }) {
       .join(" ");
 
   const renderBlock = (b: Block, level: number) => {
-    const attrs = renderAttrs(b.attrs);
+    const attrsStr = renderAttrs(b.attrs);
     const hasContent = b.content.trim().length > 0;
-    const open = attrs ? `<${b.tag} ${attrs}>` : `<${b.tag}>`;
+    const open = attrsStr ? `<${b.tag} ${attrsStr}>` : `<${b.tag}>`;
     lines.push(indent(level) + open);
     if (hasContent) {
       // multiline preserved
@@ -70,40 +70,6 @@ function buildXml(blocks: Block[], opts: { indent?: number }) {
   return lines.join("\n");
 }
 
-function parseXmlToBlocks(xml: string): { root?: string; blocks: Block[]; wrapped?: boolean; error?: string } {
-  try {
-    const parser = new DOMParser();
-    let doc = parser.parseFromString(xml, "text/xml");
-    const perr = doc.getElementsByTagName("parsererror")[0];
-    let wrapped = false;
-    if (perr) {
-      // Try wrapping with a root if multiple top-level nodes (internal only)
-      doc = parser.parseFromString(`<x-root>\n${xml}\n</x-root>`, "text/xml");
-      wrapped = true;
-    }
-    const err = doc.getElementsByTagName("parsererror")[0];
-    if (err) {
-      return { blocks: [], error: err.textContent || "XML parse error" };
-    }
-    const rootEl = doc.documentElement;
-    // If the document element has element children, treat it as root
-    const children = Array.from(rootEl.childNodes).filter((n) => n.nodeType === 1) as Element[];
-    const hasElementChildren = children.length > 0;
-    const targetEls = hasElementChildren ? children : [rootEl];
-    const blocks: Block[] = targetEls.map((el) => ({
-      id: uid("blk"),
-      tag: el.tagName,
-      content: (el.textContent || "").trim(),
-      attrs: Array.from(el.attributes).map((a) => ({ id: uid("attr"), name: a.name, value: a.value })),
-    }));
-
-    // Only keep a root when input was a valid single-root XML we didn't wrap ourselves
-    const rootName = !wrapped && hasElementChildren ? rootEl.tagName : undefined;
-    return { root: rootName, blocks, wrapped };
-  } catch (e: any) {
-    return { blocks: [], error: e?.message || "Failed to parse XML" };
-  }
-}
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -122,35 +88,59 @@ function ToolbarButton(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   );
 }
 
-function TextInput(
-  props: React.InputHTMLAttributes<HTMLInputElement> & { label?: string; labelSrOnly?: boolean }
-) {
-  const { label, labelSrOnly, className = "", id, ...rest } = props;
-  return (
-    <label className="flex items-center gap-2 text-sm">
-      {label && <span className={labelSrOnly ? "sr-only" : "min-w-16"}>{label}</span>}
-      <input
-        id={id}
-        {...rest}
-        className={`h-8 px-2 border border-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-black ${className}`}
-      />
-    </label>
-  );
-}
 
-function TextArea(
-  props: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { label?: string; labelSrOnly?: boolean }
-) {
-  const { label, labelSrOnly, className = "", id, ...rest } = props;
+function OutputFormatSelector({ 
+  content,
+  onContentChange 
+}: { 
+  content: string;
+  onContentChange: (content: string) => void; 
+}) {
+  const formatPresets = [
+    { label: 'JSON', value: 'JSON with fields:' },
+    { label: 'Markdown', value: 'Markdown' },
+    { label: 'XML', value: 'XML with nested elements:' },
+    { label: 'CSV', value: 'CSV with columns:' },
+    { label: 'YAML', value: 'YAML with nested structure:' },
+  ];
+
+  const handlePresetSelect = (preset: string) => {
+    if (preset) {
+      onContentChange(preset);
+    }
+  };
+
   return (
-    <label className="flex flex-col gap-2 text-sm">
-      {label && <span className={labelSrOnly ? "sr-only" : ""}>{label}</span>}
-      <textarea
-        id={id}
-        {...rest}
-        className={`min-h-24 p-2 border border-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-black ${className}`}
-      />
-    </label>
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-2">
+        <span className="text-sm font-medium">Quick Presets:</span>
+        <div className="flex flex-wrap gap-2">
+          {formatPresets.map((preset) => (
+            <button
+              key={preset.label}
+              className="format-preset-btn px-3 py-1 text-sm border border-black hover:bg-black hover:text-white transition-colors rounded"
+              onClick={() => handlePresetSelect(preset.value)}
+              title={`Insert: ${preset.value}`}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      
+      <div className="flex flex-col gap-2">
+        <span className="text-sm font-medium">Content:</span>
+        <textarea
+          className="w-full min-h-20 p-2 border border-black focus:ring-1 focus:ring-black focus:outline-none text-sm"
+          placeholder="Describe your desired output format or click a preset above to start"
+          value={content}
+          onChange={(e) => onContentChange(e.target.value)}
+        />
+        <div className="text-sm text-neutral-600">
+          💡 Click a preset button above to insert a template, then edit it to fit your needs
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -189,7 +179,7 @@ export default function Home() {
           { id: uid("blk"), tag: "system", content: "You are a helpful assistant.", attrs: [] },
           { id: uid("blk"), tag: "instruction", content: "Follow the steps carefully.", attrs: [] },
           { id: uid("blk"), tag: "input", content: "{user_input}", attrs: [{ id: uid("attr"), name: "format", value: "text" }] },
-          { id: uid("blk"), tag: "output_format", content: "JSON with fields: answer, reasoning", attrs: [] },
+          { id: uid("blk"), tag: "output_format", content: "JSON with fields: { \"answer\": \"string\", \"reasoning\": \"string\" }", attrs: [] },
         ]);
       }
 
@@ -512,14 +502,14 @@ export default function Home() {
         { id: uid("blk"), tag: "system", content: "You answer questions concisely.", attrs: [] },
         { id: uid("blk"), tag: "context", content: "Use only the provided context.", attrs: [] },
         { id: uid("blk"), tag: "input", content: "{question}", attrs: [{ id: uid("attr"), name: "role", value: "user" }] },
-        { id: uid("blk"), tag: "output_format", content: "Plain text answer only.", attrs: [] },
+        { id: uid("blk"), tag: "output_format", content: "Plain text response", attrs: [] },
       ]);
     } else if (kind === "cot") {
       setBlocks([
         { id: uid("blk"), tag: "system", content: "Reason step-by-step before final answer.", attrs: [] },
         { id: uid("blk"), tag: "instruction", content: "Think briefly, then answer.", attrs: [] },
         { id: uid("blk"), tag: "input", content: "{problem}", attrs: [] },
-        { id: uid("blk"), tag: "output_format", content: "JSON { reasoning, answer }", attrs: [] },
+        { id: uid("blk"), tag: "output_format", content: "JSON with fields: { \"reasoning\": \"string\", \"answer\": \"string\" }", attrs: [] },
       ]);
     } else {
       setBlocks([
@@ -548,6 +538,16 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-2 text-sm">
             <ToolbarButton onClick={() => setIsHistoryOpen(true)} aria-label="Open History">History</ToolbarButton>
+            <a
+              href="https://www.buymeacoffee.com/jinwoolee"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="h-8 flex items-center gap-2 px-2 bg-yellow-300 hover:bg-yellow-400 border border-black transition-colors text-black font-medium"
+              style={{ fontFamily: 'Cookie, cursive' }}
+            >
+              <span>☕</span>
+              <span>Buy me a coffee</span>
+            </a>
           </div>
         </div>
       </header>
@@ -643,7 +643,7 @@ export default function Home() {
                     </button>
                   </div>
                   {b.attrs.length === 0 && (
-                    <div className="text-xs text-neutral-600">No attributes</div>
+                    <div className="text-sm text-neutral-600">No attributes</div>
                   )}
                   {b.attrs.map((a) => (
                     <div key={a.id} className="flex items-center gap-2">
@@ -670,12 +670,45 @@ export default function Home() {
 
                 {/* Content */}
                 <div className="mt-3">
-                  <TextArea
-                    label="Content"
-                    placeholder="Type your prompt"
-                    value={b.content}
-                    onChange={(e) => updateBlock(b.id, { content: e.target.value })}
-                  />
+                  {b.tag === 'output_format' ? (
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm">Output Format</span>
+                        <button
+                          className="h-6 w-6 border border-black hover:bg-red-50 hover:border-red-300 transition-colors text-sm flex items-center justify-center font-mono"
+                          onClick={() => updateBlock(b.id, { content: '' })}
+                          title="Clear content"
+                        >
+                          ×
+                        </button>
+                      </div>
+                      <OutputFormatSelector
+                        content={b.content}
+                        onContentChange={(content) => {
+                          updateBlock(b.id, { content });
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm">Content</span>
+                        <button
+                          className="h-6 w-6 border border-black hover:bg-red-50 hover:border-red-300 transition-colors text-sm flex items-center justify-center font-mono"
+                          onClick={() => updateBlock(b.id, { content: '' })}
+                          title="Clear content"
+                        >
+                          ×
+                        </button>
+                      </div>
+                      <textarea
+                        className="min-h-24 p-2 border border-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-black"
+                        placeholder="Type your prompt"
+                        value={b.content}
+                        onChange={(e) => updateBlock(b.id, { content: e.target.value })}
+                      />
+                    </div>
+                  )}
                 </div>
               </li>
             );})}
@@ -862,7 +895,7 @@ export default function Home() {
               e.currentTarget.value = '';
             }}
           />
-          <span className="text-xs text-neutral-500 w-full">All of your data is stored locally in your browser.</span>
+          <span className="text-sm text-neutral-500 w-full">All of your data is stored locally in your browser.</span>
         </div>
         <div className="p-3 overflow-auto flex-1">
           <ul className="divide-y divide-black">
@@ -873,7 +906,7 @@ export default function Home() {
               <li key={h.id} className="py-2 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <span className="text-sm">{h.title}</span>
-                  <span className="text-xs text-neutral-500">{new Date(h.createdAt).toLocaleString()}</span>
+                  <span className="text-sm text-neutral-500">{new Date(h.createdAt).toLocaleString()}</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <button className="h-8 px-2 border border-black text-sm" onClick={() => setBlocks(h.blocks.map((b) => ({ ...b, id: uid('blk'), attrs: b.attrs.map((a) => ({ ...a, id: uid('attr') })) })))}>Load</button>

@@ -122,3 +122,12 @@ body {
   padding-right: 8px; /* avoid right-edge clipping */
 }
 .drawer.open { transform: translateX(0); }
+
+/* Output Format Selector Styling */
+.format-preset-btn {
+  transition: all 150ms ease-out;
+}
+.format-preset-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
