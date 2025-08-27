@@ -15,12 +15,14 @@ type HistoryEntry = { id: string; title: string; blocks: Block[]; createdAt: num
 
 const PALETTE = [
   { label: "system", tag: "system" },
-  { label: "instruction", tag: "instruction" },
   { label: "context", tag: "context" },
-  { label: "example", tag: "example" },
+  { label: "instruction", tag: "instruction" },
+  { label: "note", tag: "note" },
   { label: "input", tag: "input" },
   { label: "output", tag: "output_format" },
-  { label: "note", tag: "note" },
+  { label: "style", tag: "style" },
+  { label: "example", tag: "example" },
+  { label: "language", tag: "language" },
   { label: "custom", tag: "custom" },
 ];
 
@@ -42,6 +44,12 @@ function escapeXml(text: string) {
     .replaceAll("'", "&apos;");
 }
 
+function escapeXmlContent(text: string) {
+  // Only escape & to prevent XML entity conflicts
+  // Don't escape < and > to allow XML/HTML examples in content
+  return text.replaceAll("&", "&amp;");
+}
+
 function buildXml(blocks: Block[], opts: { indent?: number }) {
   const indentSize = Math.max(0, Math.min(8, opts.indent ?? 2));
   const lines: string[] = [];
@@ -60,7 +68,7 @@ function buildXml(blocks: Block[], opts: { indent?: number }) {
     if (hasContent) {
       // multiline preserved
       b.content.split("\n").forEach((ln) => {
-        lines.push(indent(level + 1) + escapeXml(ln));
+        lines.push(indent(level + 1) + escapeXmlContent(ln));
       });
     }
     lines.push(indent(level) + `</${b.tag}>`);
@@ -107,7 +115,7 @@ function parseXmlToBlocks(xml: string): { root?: string; blocks: Block[]; wrappe
 
 export function meta({}: Route.MetaArgs) {
   return [
-    { title: "Prompt Blocks — XML Builder" },
+    { title: "Prompt Blocks — Organize your intelligence" },
     { name: "description", content: "Assemble XML prompt blocks interactively and export instantly." },
   ];
 }
@@ -278,9 +286,27 @@ export default function Home() {
 
   function addBlock(tag: string) {
     const id = uid("blk");
+    let content = "";
+    let attrs: XmlAttr[] = [];
+    
+    // Add default content for specific blocks
+    if (tag === "system") {
+      content = "Act as ";
+      attrs = [];
+    } else if (tag === "output_format") {
+      content = "Specify the desired output format and structure";
+      attrs = [];
+    } else if (tag === "style") {
+      content = "Professional and clear";
+      attrs = [];
+    } else if (tag === "language") {
+      content = "Answer in Korean";
+      attrs = [];
+    }
+    
     setBlocks((prev) => [
       ...prev,
-      { id, tag, content: "", attrs: [] },
+      { id, tag, content, attrs },
     ]);
     setJustAddedId(id);
     setTimeout(() => setJustAddedId((v) => (v === id ? null : v)), 280);
@@ -565,7 +591,7 @@ export default function Home() {
             {PALETTE.map((p) => (
               <button
                 key={p.tag}
-                className="h-8 px-2 border border-black hover:bg-black hover:text-white text-sm"
+                className="h-8 px-2 border border-black hover:bg-black hover:text-white text-xs sm:text-sm min-w-0 shrink-0"
                 onClick={() => addBlock(p.tag)}
               >
                 + {p.label}
@@ -612,7 +638,7 @@ export default function Home() {
                     </button>
                     <input
                       type="text"
-                      className="h-8 w-36 px-2 border border-black"
+                      className="h-8 w-28 sm:w-36 px-2 border border-black text-xs sm:text-sm"
                       value={b.tag}
                       onChange={(e) => updateBlock(b.id, { tag: e.target.value.replace(/\s+/g, "") })}
                       placeholder="tag"
@@ -649,7 +675,7 @@ export default function Home() {
                     <div key={a.id} className="flex items-center gap-2">
                       <input
                         type="text"
-                        className="h-8 w-40 px-2 border border-black"
+                        className="h-8 w-32 sm:w-40 px-2 border border-black text-xs sm:text-sm"
                         placeholder="name"
                         value={a.name}
                         onChange={(e) => updateAttr(b.id, a.id, { name: e.target.value.replace(/\s+/g, "") })}
@@ -676,6 +702,158 @@ export default function Home() {
                     value={b.content}
                     onChange={(e) => updateBlock(b.id, { content: e.target.value })}
                   />
+                  {/* Format quick selectors for output_format blocks */}
+                  {b.tag === "output_format" && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      <button
+                        className="px-2 py-1 text-xs border border-black hover:bg-black hover:text-white"
+                        onClick={() => {
+                          const content = `{
+  "answer": "Your response here",
+  "reasoning": "Explanation if needed"
+}`;
+                          const attrs = b.attrs.filter(a => a.name !== "format").concat([{ id: uid("attr"), name: "format", value: "json" }]);
+                          updateBlock(b.id, { content, attrs });
+                        }}
+                        title="Simple JSON object"
+                      >
+                        JSON
+                      </button>
+                      <button
+                        className="px-2 py-1 text-xs border border-black hover:bg-black hover:text-white"
+                        onClick={() => {
+                          const content = `{
+  "result": {
+    "summary": "Brief overview",
+    "details": {
+      "key1": "value1",
+      "key2": "value2"
+    },
+    "metadata": {
+      "confidence": 0.95,
+      "timestamp": "ISO-8601"
+    }
+  }
+}`;
+                          const attrs = b.attrs.filter(a => a.name !== "format").concat([{ id: uid("attr"), name: "format", value: "json" }]);
+                          updateBlock(b.id, { content, attrs });
+                        }}
+                        title="Nested JSON object"
+                      >
+                        JSON Nested
+                      </button>
+                      <button
+                        className="px-2 py-1 text-xs border border-black hover:bg-black hover:text-white"
+                        onClick={() => {
+                          const content = `[
+  {
+    "id": 1,
+    "name": "Item 1",
+    "description": "Details here"
+  },
+  {
+    "id": 2,
+    "name": "Item 2",
+    "description": "Details here"
+  }
+]`;
+                          const attrs = b.attrs.filter(a => a.name !== "format").concat([{ id: uid("attr"), name: "format", value: "json" }]);
+                          updateBlock(b.id, { content, attrs });
+                        }}
+                        title="JSON array"
+                      >
+                        JSON Array
+                      </button>
+                      <button
+                        className="px-2 py-1 text-xs border border-black hover:bg-black hover:text-white"
+                        onClick={() => {
+                          const content = `<response>
+  <answer>Your response here</answer>
+  <reasoning>Explanation if needed</reasoning>
+</response>`;
+                          const attrs = b.attrs.filter(a => a.name !== "format").concat([{ id: uid("attr"), name: "format", value: "xml" }]);
+                          updateBlock(b.id, { content, attrs });
+                        }}
+                        title="XML template"
+                      >
+                        XML
+                      </button>
+                      <button
+                        className="px-2 py-1 text-xs border border-black hover:bg-black hover:text-white"
+                        onClick={() => {
+                          const content = `Plain text response`;
+                          const attrs = b.attrs.filter(a => a.name !== "format").concat([{ id: uid("attr"), name: "format", value: "text" }]);
+                          updateBlock(b.id, { content, attrs });
+                        }}
+                        title="Plain text template"
+                      >
+                        Plain
+                      </button>
+                      <button
+                        className="px-2 py-1 text-xs border border-black hover:bg-black hover:text-white"
+                        onClick={() => {
+                          const content = `## Response
+
+- Key points in bullet form
+- Clear structure
+
+**Important:** Highlight key information`;
+                          const attrs = b.attrs.filter(a => a.name !== "format").concat([{ id: uid("attr"), name: "format", value: "markdown" }]);
+                          updateBlock(b.id, { content, attrs });
+                        }}
+                        title="Markdown template"
+                      >
+                        Markdown
+                      </button>
+                    </div>
+                  )}
+                  {/* Style quick selectors for style blocks */}
+                  {b.tag === "style" && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      <button
+                        className="px-2 py-1 text-xs border border-black hover:bg-black hover:text-white"
+                        onClick={() => updateBlock(b.id, { content: "Professional and clear" })}
+                        title="Professional style"
+                      >
+                        Professional
+                      </button>
+                      <button
+                        className="px-2 py-1 text-xs border border-black hover:bg-black hover:text-white"
+                        onClick={() => updateBlock(b.id, { content: "Friendly and conversational" })}
+                        title="Friendly style"
+                      >
+                        Friendly
+                      </button>
+                      <button
+                        className="px-2 py-1 text-xs border border-black hover:bg-black hover:text-white"
+                        onClick={() => updateBlock(b.id, { content: "Concise and direct" })}
+                        title="Concise style"
+                      >
+                        Concise
+                      </button>
+                      <button
+                        className="px-2 py-1 text-xs border border-black hover:bg-black hover:text-white"
+                        onClick={() => updateBlock(b.id, { content: "Academic and formal" })}
+                        title="Academic style"
+                      >
+                        Academic
+                      </button>
+                      <button
+                        className="px-2 py-1 text-xs border border-black hover:bg-black hover:text-white"
+                        onClick={() => updateBlock(b.id, { content: "Technical and precise" })}
+                        title="Technical style"
+                      >
+                        Technical
+                      </button>
+                      <button
+                        className="px-2 py-1 text-xs border border-black hover:bg-black hover:text-white"
+                        onClick={() => updateBlock(b.id, { content: "Creative and engaging" })}
+                        title="Creative style"
+                      >
+                        Creative
+                      </button>
+                    </div>
+                  )}
                 </div>
               </li>
             );})}
@@ -705,9 +883,9 @@ export default function Home() {
             </div>
           </h2>
           {/* Templates mini bar above preview */}
-          <div className="px-3 py-2 border-b border-black flex items-center gap-2 text-sm">
+          <div className="px-3 py-2 border-b border-black flex items-center gap-2 text-sm flex-wrap sm:flex-nowrap">
             <select
-              className="h-8 px-2 border border-black"
+              className="h-8 px-2 border border-black min-w-0 flex-shrink-0 text-xs sm:text-sm"
               onChange={(e) => handleTemplateSelect(e.target.value)}
               defaultValue=""
               title="Load a template"
@@ -729,7 +907,7 @@ export default function Home() {
             </select>
             <input
               type="text"
-              className="h-8 w-44 px-2 border border-black"
+              className="h-8 w-32 sm:w-44 px-2 border border-black"
               placeholder="Template name"
               value={templateName}
               onChange={(e) => setTemplateName(e.target.value)}
